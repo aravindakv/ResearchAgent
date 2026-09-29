@@ -1,0 +1,33 @@
+# Everything needed to run all components on the host during development.
+# Each service gets its own smaller requirements.txt in chapter 10.
+
+# Agent
+langgraph>=0.6
+langgraph-checkpoint-postgres>=2.0
+langchain-core>=0.3
+langchain-openai>=0.3
+langchain-mcp-adapters>=0.1
+langchain-text-splitters>=0.3
+langsmith>=0.3
+openai>=1.40
+tavily-python>=0.5
+
+# Data
+psycopg[binary]>=3.2
+psycopg-pool>=3.2
+redis>=5.0
+pydantic>=2.7
+python-dotenv>=1.0
+
+# API
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
+# MCP server
+mcp>=1.10
+starlette>=0.37
+httpx>=0.27
+trafilatura>=1.12
+markdown>=3.6
+nh3>=0.2
+weasyprint>=62
