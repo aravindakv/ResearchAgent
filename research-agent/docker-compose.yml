@@ -1,0 +1,41 @@
+# Development infrastructure (chapters 02-09). Chapter 10 replaces this file with the full stack.
+name: research-agent
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_DB: agent
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets: [pg_password]
+    ports:
+      - "127.0.0.1:5432:5432"      # reachable from this machine only
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./infra/postgres/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$(cat /run/secrets/redis_password)\" --appendonly yes"]
+    secrets: [redis_password]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/redis_password)\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pg_data:
+  redis_data:
+
+secrets:
+  pg_password:    {file: ./secrets/pg_password}
+  redis_password: {file: ./secrets/redis_password}
