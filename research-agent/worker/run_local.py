@@ -1,4 +1,3 @@
-
 """Run the graph from the command line.
 
     python worker/run_local.py "topic"            # new run (creates a job row)
@@ -11,17 +10,18 @@ import asyncio
 import uuid
 
 import psycopg
+from decisions import engine_name
 from graph import build_graph
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from settings import DB_URL
+from settings import DB_URL, REPORTS_DIR
+
+SHOW = ("final_status", "error", "topic", "guard_scores", "iterations", "chunks_dropped", "sufficiency",
+        "faithfulness")
 
 
 def config_for(job_id: str) -> dict:
-    return {"configurable": {"thread_id": job_id}, "recursion_limit": 40, "run_name": "research-local"}
-
-
-def summarize(values: dict) -> dict:
-    return {k: (f"<{len(v)} chars>" if isinstance(v, str) and len(v) > 120 else v) for k, v in values.items()}
+    return {"configurable": {"thread_id": job_id}, "recursion_limit": 40, "run_name": "research-local",
+            "metadata": {"job_id": job_id, "decision_engine": engine_name()}}
 
 
 async def create_job(topic: str) -> str:
@@ -50,7 +50,10 @@ async def main() -> None:
         if args.show:
             snapshot = await graph.aget_state(config_for(args.show))
             print("next:", snapshot.next)
-            print(summarize(snapshot.values))
+            for key in SHOW:
+                print(f"  {key}: {snapshot.values.get(key)}")
+            for p in snapshot.values.get("unsupported", [])[:3]:
+                print("  unsupported:", p[:100])
             return
         if args.resume:
             job_id, payload = args.resume, None
@@ -58,13 +61,17 @@ async def main() -> None:
             if not args.topic:
                 ap.error("give a topic, --resume ID, --show ID or --graph")
             job_id = await create_job(args.topic)
-            payload = {"job_id": job_id, "topic": args.topic, "iterations": 0}
+            payload = {"job_id": job_id, "raw_input": args.topic, "iterations": 0}
 
-        print("job:", job_id)
+        print(f"job: {job_id}  (decision engine: {engine_name()})")
         async for update in graph.astream(payload, config_for(job_id), stream_mode="updates"):
             for node in update:
                 print("  finished:", node)
-        print(summarize((await graph.aget_state(config_for(job_id))).values))
+        values = (await graph.aget_state(config_for(job_id))).values
+        for key in SHOW:
+            print(f"  {key}: {values.get(key)}")
+        if values.get("final_status", "").startswith("done"):
+            print("  pdf:", REPORTS_DIR / f"{job_id}.pdf")
 
 
 if __name__ == "__main__":
