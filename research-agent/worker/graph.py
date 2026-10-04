@@ -1,16 +1,25 @@
 import asyncio
 import base64
 import json
+import base64
+import json
 import os
 from typing import TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from pdf import markdown_to_pdf
 from pydantic import BaseModel
-from settings import CHAT_MODEL, MCP_TOKEN, MCP_URL, REPORTS_DIR  # loads .env and API keys first
+from settings import (  # loads .env and API keys first
+    CHAT_MODEL,
+    MCP_TOKEN,
+    MCP_URL,
+    REPORTS_DIR,
+)
+
 # from tavily import TavilyClient
 
 MAX_RESEARCH_ROUNDS = 2
@@ -46,6 +55,11 @@ def as_untrusted(sources: list[dict]) -> str:
                        for i, s in enumerate(sources))
 
 async def build_graph(checkpointer):
+    mcp = MultiServerMCPClient({
+        "research": {"transport": "streamable_http", "url": MCP_URL,
+                     "headers": {"Authorization": f"Bearer {MCP_TOKEN}"}},
+    })
+    tools = {t.name: t for t in await mcp.get_tools()}
     mcp = MultiServerMCPClient({
         "research": {"transport": "streamable_http", "url": MCP_URL,
                      "headers": {"Authorization": f"Bearer {MCP_TOKEN}"}},
