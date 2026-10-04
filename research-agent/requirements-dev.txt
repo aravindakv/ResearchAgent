@@ -24,7 +24,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 
 # MCP server
-mcp>=1.10
+mcp>=2.3,<3                 # SDK 2.x: speaks MCP protocol 2026-07-28 (and older clients)
 starlette>=0.37
 httpx>=0.27
 trafilatura>=1.12

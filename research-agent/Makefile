@@ -1,11 +1,16 @@
 .RECIPEPREFIX = >
 PY := .venv/bin/python
-.PHONY: venv secrets infra-up infra-down psql redis-cli mcp run resume show graph api worker smoke-dev
+PY_MCP := .venv-mcp/bin/python
+.PHONY: venv venv-mcp secrets infra-up infra-down psql redis-cli mcp run resume show graph api worker smoke-dev
 
 # ---- setup ----
 venv:
-> uv venv .venv --python 3.12
+> uv venv .venv --python 3.12 --clear
 > uv pip install --python $(PY) -r requirements-dev.txt
+
+venv-mcp:
+> uv venv .venv-mcp --python 3.12 --clear
+> uv pip install --python $(PY_MCP) -r mcp_server/requirements.txt
 
 secrets:
 > ./scripts/init-secrets.sh
@@ -25,7 +30,7 @@ redis-cli:
 
 # ---- host development (chapters 04-09) ----
 mcp:
-> $(PY) mcp_server/server.py
+> $(PY_MCP) mcp_server/server.py
 
 run:
 > $(PY) worker/run_local.py "$(TOPIC)"

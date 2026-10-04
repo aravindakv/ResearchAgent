@@ -465,158 +465,7 @@ for u in ['https://example.com', 'http://169.254.169.254/', 'http://localhost/',
 
 ---
 
-## Step 6: Automate the checks
-
-Typing those commands every time you change the server gets old. This script runs all of them, plus an authentication check, and prints PASS/FAIL with the reason for each:
-
-File: `scripts/mcp-tools-check.sh`
-
-```bash
-#!/usr/bin/env bash
-# Chapter 05: exercise every MCP tool through the MCP Inspector CLI (latest), with PASS/FAIL per check.
-#
-#   scripts/mcp-tools-check.sh          (or: make mcp-check)
-#
-# Needs: the MCP server running (`make mcp` in another terminal), Node.js (npx), jq, curl.
-# Works from any directory: it switches to the repo root itself.
-# Overrides: MCP_CHECK_URL (default http://127.0.0.1:8200/mcp), INSPECTOR (the command to run).
-set -uo pipefail
-cd "$(dirname "$0")/.."
-
-URL=${MCP_CHECK_URL:-http://127.0.0.1:8200/mcp}
-BASE=${URL%/mcp}
-INSPECTOR=${INSPECTOR:-npx -y @modelcontextprotocol/inspector@latest}
-PDF=reports/mcp-check.pdf
-PASS=0
-FAIL=0
-
-ok()   { echo "  PASS  $1"; PASS=$((PASS + 1)); }
-bad()  { echo "  FAIL  $1"; FAIL=$((FAIL + 1)); }
-info() { echo "        $1"; }
-
-# ---------------------------------------------------------------- prerequisites
-echo "== Prerequisites"
-missing=0
-for cmd in npx jq curl; do
-  command -v "$cmd" >/dev/null || { echo "  missing command: $cmd"; missing=1; }
-done
-[ -s secrets/mcp_token ] || { echo "  missing secrets/mcp_token: run 'make secrets'"; missing=1; }
-if ! curl -sf "$BASE/healthz" >/dev/null; then
-  echo "  MCP server not reachable at $BASE: start it with 'make mcp' in another terminal"
-  missing=1
-fi
-[ "$missing" -eq 0 ] || exit 2
-echo "  ok: npx, jq, curl, token, server at $BASE"
-TOKEN=$(cat secrets/mcp_token)
-
-# call_tool <tool> "<name>=<value>": prints the tool result JSON (stdout only)
-call_tool() {
-  $INSPECTOR --cli "$URL" --header "Authorization: Bearer $TOKEN" \
-    --method tools/call --tool-name "$1" --tool-arg "$2" 2>/dev/null
-}
-text_of()  { jq -r '.content[0].text // empty' 2>/dev/null; }
-error_of() { jq -r '.isError // false' 2>/dev/null; }
-
-# ---------------------------------------------------------------- 0. auth
-echo "== 0. Requests without the token are refused"
-code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL")
-[ "$code" = "401" ] && ok "POST /mcp without token -> 401" || bad "expected 401 without token, got $code"
-
-# ---------------------------------------------------------------- 1. web_search
-echo "== 1. web_search returns JSON results"
-out=$(call_tool web_search "query=raft leader election")
-count=$(printf '%s' "$out" | text_of | jq 'length' 2>/dev/null || echo 0)
-if [ "$(printf '%s' "$out" | error_of)" = "false" ] && [ "${count:-0}" -gt 0 ] 2>/dev/null; then
-  ok "$count results"
-  printf '%s' "$out" | text_of | jq -r '.[:3][] | "- \(.title) (\(.url))"' | while read -r line; do info "$line"; done
-else
-  bad "no results: $(printf '%s' "$out" | text_of | head -c 160)"
-  info "check secrets/tavily_api_key and the server log in the other terminal"
-fi
-
-# ---------------------------------------------------------------- 2. fetch_page (public)
-echo "== 2. fetch_page reads a public page"
-out=$(call_tool fetch_page "url=https://example.com")
-txt=$(printf '%s' "$out" | text_of)
-if [ "$(printf '%s' "$out" | error_of)" = "false" ] && [ -n "$txt" ]; then
-  ok "got $(printf '%s' "$txt" | wc -c) characters of text"
-  info "$(printf '%s' "$txt" | head -c 100 | tr '\n' ' ')..."
-else
-  bad "fetch failed: ${txt:-no output}"
-  info "if checks 3 and 4 pass, this machine probably can't reach the internet from the terminal (proxy/firewall)"
-fi
-
-# ---------------------------------------------------------------- 3 and 4. SSRF guard
-blocked_check() {  # <title> <url>
-  echo "== $1"
-  local out txt
-  out=$(call_tool fetch_page "url=$2")
-  txt=$(printf '%s' "$out" | text_of)
-  if [ "$(printf '%s' "$out" | error_of)" = "true" ] && [[ "$txt" == *"non-public address blocked"* ]]; then
-    ok "$2 -> blocked"
-  else
-    bad "$2 was NOT blocked as expected: ${txt:-no output}"
-  fi
-}
-blocked_check "3. fetch_page refuses the cloud metadata address" "http://169.254.169.254/latest/meta-data/"
-blocked_check "4. fetch_page refuses loopback (the server itself)" "http://127.0.0.1:8200/healthz"
-
-# ---------------------------------------------------------------- 5. render_pdf
-echo "== 5. render_pdf returns a base64 PDF"
-mkdir -p reports
-call_tool render_pdf "markdown=# Hello" | text_of | base64 -d > "$PDF" 2>/dev/null
-if [ "$(head -c 5 "$PDF" 2>/dev/null)" = "%PDF-" ]; then
-  ok "saved $PDF ($(wc -c < "$PDF") bytes); open it with: xdg-open $PDF"
-else
-  bad "no valid PDF returned (check the server log for WeasyPrint errors)"
-fi
-
-# ---------------------------------------------------------------- summary
-echo
-echo "== $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
-```
-
-**Do:** with `make mcp` running in the other terminal:
-
-```bash
-chmod +x scripts/mcp-tools-check.sh
-make mcp-check
-```
-
-Expected:
-
-```
-== Prerequisites
-  ok: npx, jq, curl, token, server at http://127.0.0.1:8200
-== 0. Requests without the token are refused
-  PASS  POST /mcp without token -> 401
-== 1. web_search returns JSON results
-  PASS  4 results
-        - ...
-== 2. fetch_page reads a public page
-  PASS  got ... characters of text
-== 3. fetch_page refuses the cloud metadata address
-  PASS  http://169.254.169.254/latest/meta-data/ -> blocked
-== 4. fetch_page refuses loopback (the server itself)
-  PASS  http://127.0.0.1:8200/healthz -> blocked
-== 5. render_pdf returns a base64 PDF
-  PASS  saved reports/mcp-check.pdf (... bytes); open it with: xdg-open reports/mcp-check.pdf
-
-== 6 passed, 0 failed
-```
-
-**Why:**
-
-- **It switches to the repo root itself** (`cd "$(dirname "$0")/.."`), so it works from any directory: the `secrets/` path is always right.
-- **Prerequisites first.** A missing tool, token or server gives one clear message and exit code 2, instead of six confusing failures.
-- **Checks look at `isError` and the message**, not just "some output appeared". A guard that silently returned an empty page would fail check 3, not pass it.
-- **The exit code is 0 only when everything passes**, so you can use it in scripts and CI later.
-- **`stderr` from the Inspector is discarded** (`2>/dev/null`) because on tool errors the CLI adds a one-line summary there. If a check fails mysteriously, run the same call by hand without it (step 5).
-
----
-
-## Step 7: Run the graph through MCP
+## Step 6: Run the graph through MCP
 
 **Do:** keep `make mcp` running, and in terminal 2:
 
@@ -637,7 +486,6 @@ Stop the MCP server (Ctrl+C) and run again: the graph fails at startup with a co
 | `/healthz` | `{"ok":true}` without a token |
 | `POST /mcp` without token | `401` |
 | `inspector@latest` connects | Tools listed (protocol `2026-07-28`) |
-| `make mcp-check` | `6 passed, 0 failed` |
 | Inspector `web_search` | JSON list of results |
 | `fetch_page` on metadata, loopback, `file://` | all blocked |
 | `make run` | Completes; PDF produced via `render_pdf` |
@@ -648,8 +496,6 @@ Stop the MCP server (Ctrl+C) and run again: the graph fails at startup with a co
 | Symptom | Fix |
 |---|---|
 | `address already in use` on 8200 | Change `MCP_PORT` and `MCP_URL` in `.env`. |
-| `make mcp-check`: `missing secrets/mcp_token` or `server not reachable` | Run it from the repo, after `make secrets`, with `make mcp` running in another terminal. |
-| `make mcp-check`: check 1 fails, checks 3–5 pass | The server works but search doesn't: check `secrets/tavily_api_key` and the server log. |
 | Inspector connects but lists no tools | Header missing or wrong: it must be `Bearer ` followed by the exact token. |
 | `421 Misdirected Request` or an "invalid Host header" error | The SDK's DNS-rebinding protection rejected the Host header. Connect via `127.0.0.1`, not `localhost`, or see the MCP SDK's transport security settings. |
 | Inspector: `Unsupported protocol version: 2026-07-28. Supported versions: ... 2025-11-25` | The server is running on SDK 1.x, so you started it with the wrong environment. Use `make mcp` (which runs `.venv-mcp`), and check `.venv-mcp/bin/python -c "import mcp.server.mcpserver"`. |

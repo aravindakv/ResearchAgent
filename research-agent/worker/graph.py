@@ -1,14 +1,17 @@
 import asyncio
+import base64
+import json
 import os
 from typing import TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from pdf import markdown_to_pdf
 from pydantic import BaseModel
-from settings import CHAT_MODEL, REPORTS_DIR  # loads .env and API keys first
-from tavily import TavilyClient
+from settings import CHAT_MODEL, MCP_TOKEN, MCP_URL, REPORTS_DIR  # loads .env and API keys first
+# from tavily import TavilyClient
 
 MAX_RESEARCH_ROUNDS = 2
 MAX_SOURCE_CHARS = 4000
@@ -43,8 +46,13 @@ def as_untrusted(sources: list[dict]) -> str:
                        for i, s in enumerate(sources))
 
 async def build_graph(checkpointer):
+    mcp = MultiServerMCPClient({
+        "research": {"transport": "streamable_http", "url": MCP_URL,
+                     "headers": {"Authorization": f"Bearer {MCP_TOKEN}"}},
+    })
+    tools = {t.name: t for t in await mcp.get_tools()}
     llm = ChatOpenAI(model=CHAT_MODEL)
-    tavily = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+    # tavily = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
 
     async def planner(state: State) -> dict:
         plan = await llm.with_structured_output(Plan).ainvoke([
@@ -59,13 +67,18 @@ async def build_graph(checkpointer):
         seen = {s["url"] for s in sources}
         for query in state.get("queries", []):
             # The Tavily client is synchronous: run it in a thread so the event loop isn't blocked.
-            result = await asyncio.to_thread(tavily.search, query=query, max_results=3, include_raw_content=True)
-            for item in result.get("results", []):
-                url = item.get("url", "")
-                text = (item.get("raw_content") or item.get("content") or "")[:MAX_SOURCE_CHARS]
-                if url and text and url not in seen:
-                    seen.add(url)
-                    sources.append({"url": url, "text": text})
+            # result = await asyncio.to_thread(tavily.search, query=query, max_results=3, include_raw_content=True)
+            # for item in result.get("results", []):
+            #     url = item.get("url", "")
+            #     text = (item.get("raw_content") or item.get("content") or "")[:MAX_SOURCE_CHARS]
+            #     if url and text and url not in seen:
+            #         seen.add(url)
+            #         sources.append({"url": url, "text": text})
+            raw = await tools["web_search"].ainvoke({"query": query, "max_results": 3})
+            for hit in json.loads(as_text(raw) or "[]"):
+                if hit["url"] not in seen:
+                    seen.add(hit["url"])
+                    sources.append({"url": hit["url"], "text": hit["content"][:MAX_SOURCE_CHARS]})
         return {"sources": sources, "iterations": state.get("iterations", 0) + 1}
 
     async def critic(state: State) -> dict:
@@ -92,8 +105,10 @@ async def build_graph(checkpointer):
         return {"draft": f"# {state['topic']}\n\n{as_text(msg.content)}\n\n## References\n\n{refs}"}
 
     async def render(state: State) -> dict:
+        encoded = as_text(await tools["render_pdf"].ainvoke({"markdown": state["draft"]}))
         path = REPORTS_DIR / f"{state['thread_id']}.pdf"
-        path.write_bytes(await asyncio.to_thread(markdown_to_pdf, state["draft"]))
+        # path.write_bytes(await asyncio.to_thread(markdown_to_pdf, state["draft"]))
+        path.write_bytes(base64.b64decode(encoded))
         return {"pdf_path": str(path)}
 
     g = StateGraph(State)

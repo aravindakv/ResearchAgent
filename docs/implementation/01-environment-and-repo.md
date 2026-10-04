@@ -110,6 +110,7 @@ infra/caddy-root.crt
 
 # Python
 .venv/
+.venv-mcp/
 __pycache__/
 *.pyc
 ```
@@ -184,7 +185,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 
 # MCP server
-mcp>=1.10
+mcp>=1.10,<2                # client side: langchain-mcp-adapters requires mcp 1.x (server: chapter 05)
 starlette>=0.37
 httpx>=0.27
 trafilatura>=1.12

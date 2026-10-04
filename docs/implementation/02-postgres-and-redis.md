@@ -154,12 +154,17 @@ File: `Makefile`
 ```makefile
 .RECIPEPREFIX = >
 PY := .venv/bin/python
-.PHONY: venv secrets infra-up infra-down psql redis-cli mcp run resume show graph api worker smoke-dev
+PY_MCP := .venv-mcp/bin/python
+.PHONY: venv venv-mcp secrets infra-up infra-down psql redis-cli mcp mcp-check run resume show graph api worker smoke-dev
 
 # ---- setup ----
 venv:
 > uv venv .venv --python 3.12
 > uv pip install --python $(PY) -r requirements-dev.txt
+
+venv-mcp:
+> uv venv .venv-mcp --python 3.12
+> uv pip install --python $(PY_MCP) -r mcp_server/requirements.txt
 
 secrets:
 > ./scripts/init-secrets.sh
@@ -179,7 +184,10 @@ redis-cli:
 
 # ---- host development (chapters 04-09) ----
 mcp:
-> $(PY) mcp_server/server.py
+> $(PY_MCP) mcp_server/server.py
+
+mcp-check:
+> ./scripts/mcp-tools-check.sh
 
 run:
 > $(PY) worker/run_local.py "$(TOPIC)"
@@ -203,7 +211,7 @@ smoke-dev:
 > BASE=http://127.0.0.1:8100 ./scripts/smoke-test.sh "$(TOPIC)"
 ```
 
-The later targets refer to files you haven't written yet. They're here now so this Makefile doesn't need to change again until chapter 10.
+The later targets refer to files you haven't written yet. They're here now so this Makefile doesn't need to change again until chapter 10. `venv-mcp` and `mcp` use a second Python environment for the MCP server; chapter 05 explains why.
 
 ---
 
