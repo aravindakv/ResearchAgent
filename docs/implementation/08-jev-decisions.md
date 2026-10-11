@@ -169,7 +169,7 @@ langchain-text-splitters>=0.3
 langsmith>=0.3
 openai>=1.40
 tavily-python>=0.5
-langchain-typesafe          # Jev (chapter 08)
+langchain-typesafe          # Jev / OpenJev (chapter 08)
 
 # Data
 psycopg[binary]>=3.2
@@ -183,7 +183,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 
 # MCP server
-mcp>=1.10
+mcp>=1.10,<2                # client side: langchain-mcp-adapters requires mcp 1.x (server: chapter 05)
 starlette>=0.37
 httpx>=0.27
 trafilatura>=1.12
@@ -208,7 +208,7 @@ Before wiring it in, see the raw shape of an answer. The script reads `.env`, so
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(".env")    # explicit path: piped code (python -) has no file for dotenv to search from
 os.environ["TYPESAFE_API_KEY"] = Path("secrets/typesafe_api_key").read_text().strip()
 from langchain_typesafe import Noul, TypeSafeClassifier
 
