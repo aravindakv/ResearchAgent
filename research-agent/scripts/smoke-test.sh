@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # Submits a topic, polls until finished, downloads the PDF.
 #   BASE=http://127.0.0.1:8100 scripts/smoke-test.sh "topic"    # host development (chapter 09)

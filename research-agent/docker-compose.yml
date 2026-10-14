@@ -1,19 +1,107 @@
-# Development infrastructure (chapters 02-09). Chapter 10 replaces this file with the full stack.
 name: research-agent
 
+# Container-side values that override the host-development values in .env.
+x-container-env: &container-env
+  SECRETS_DIR: /run/secrets
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  REDIS_HOST: redis
+  MCP_BIND: 0.0.0.0
+  MCP_PORT: "8000"
+  MCP_URL: http://mcp:8000/mcp
+  MCP_ALLOWED_HOSTS: "mcp:8000,localhost:*"
+  REPORTS_DIR: /reports
+  HOME: /tmp
+  XDG_CACHE_HOME: /tmp
+
+# Hardening for the images we build: read-only root FS, no privilege escalation, no capabilities.
+x-hardening: &hardening
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  restart: unless-stopped
+  env_file: .env
+
 services:
+  caddy:
+    image: caddy:2
+    ports:
+      - "127.0.0.1:${CADDY_HTTPS_PORT:-443}:443"   # localhost only; see chapter 12 before exposing to your LAN
+      - "127.0.0.1:${CADDY_HTTP_PORT:-80}:80"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [public, edge]
+    depends_on:
+      api: {condition: service_healthy}
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  api:
+    <<: *hardening
+    build: ./api
+    environment:
+      <<: *container-env
+      DB_USER: app_api
+      DB_PASSWORD_SECRET: pg_api_password
+      ENABLE_DOCS: "0"
+    secrets: [pg_api_password, redis_password, api_tokens]
+    volumes:
+      - reports:/reports:ro
+    networks: [edge, data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)"]
+      interval: 10s
+      retries: 5
+
+  worker:
+    <<: *hardening
+    build: ./worker
+    environment:
+      <<: *container-env
+      DB_USER: app_worker
+      DB_PASSWORD_SECRET: pg_worker_password
+    secrets: [pg_worker_password, redis_password, mcp_token, openai_api_key, langsmith_api_key, typesafe_api_key]
+    volumes:
+      - reports:/reports
+    networks: [data, tools, egress]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      mcp: {condition: service_healthy}
+    deploy:
+      replicas: 2
+
+  mcp:
+    <<: *hardening
+    build: ./mcp_server
+    environment: *container-env
+    secrets: [mcp_token, tavily_api_key]
+    networks: [tools, egress]          # no route to postgres, redis, or the API
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)"]
+      interval: 10s
+      retries: 5
+
   postgres:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: agent
       POSTGRES_DB: agent
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
-    secrets: [pg_password]
-    ports:
-      - "127.0.0.1:5432:5432"      # reachable from this machine only
+    secrets: [pg_password, pg_api_password, pg_worker_password]
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./infra/postgres/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./infra/postgres/02-roles.sh:/docker-entrypoint-initdb.d/02-roles.sh:ro
+    networks: [data]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
       interval: 5s
@@ -23,19 +111,38 @@ services:
     image: redis:7-alpine
     command: ["sh", "-c", "exec redis-server --requirepass \"$$(cat /run/secrets/redis_password)\" --appendonly yes"]
     secrets: [redis_password]
-    ports:
-      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+    networks: [data]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/redis_password)\" --no-auth-warning ping | grep -q PONG"]
       interval: 5s
       retries: 10
 
+networks:
+  public: {}                 # only Caddy; host ports are published here
+  edge: {internal: true}     # Caddy <-> API
+  data: {internal: true}     # API/worker <-> Postgres, Redis
+  tools: {internal: true}    # worker <-> MCP server
+  egress: {}                 # internet: worker (OpenAI, TypeSafe, LangSmith) and MCP (web)
+
 volumes:
   pg_data:
   redis_data:
+  caddy_data:
+  caddy_config:
+  reports:
 
 secrets:
-  pg_password:    {file: ./secrets/pg_password}
-  redis_password: {file: ./secrets/redis_password}
+  pg_password:        {file: ./secrets/pg_password}
+  pg_api_password:    {file: ./secrets/pg_api_password}
+  pg_worker_password: {file: ./secrets/pg_worker_password}
+  redis_password:     {file: ./secrets/redis_password}
+  mcp_token:          {file: ./secrets/mcp_token}
+  api_tokens:         {file: ./secrets/api_tokens}
+  openai_api_key:     {file: ./secrets/openai_api_key}
+  tavily_api_key:     {file: ./secrets/tavily_api_key}
+  langsmith_api_key:  {file: ./secrets/langsmith_api_key}
+  typesafe_api_key:   {file: ./secrets/typesafe_api_key}

@@ -1,0 +1,14 @@
+langgraph>=0.6
+langgraph-checkpoint-postgres>=2.0
+langchain-core>=0.3
+langchain-openai>=0.3
+mcp>=2.3,<3                 # SDK 2.x client for worker/mcp_tools.py (pulls in httpx2)
+langchain-text-splitters>=0.3
+langchain-typesafe
+langsmith>=0.3
+openai>=1.40
+psycopg[binary]>=3.2
+psycopg-pool>=3.2
+redis>=5.0
+pydantic>=2.7
+python-dotenv>=1.0

@@ -21,6 +21,7 @@ import uvicorn
 from dotenv import load_dotenv
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.responses import JSONResponse, PlainTextResponse
 from tavily import TavilyClient
 from weasyprint import HTML
@@ -29,6 +30,8 @@ load_dotenv()
 SECRETS_DIR = Path(os.environ.get("SECRETS_DIR", "/run/secrets"))
 BIND = os.environ.get("MCP_BIND", "127.0.0.1")
 PORT = int(os.environ.get("MCP_PORT", "8200"))
+# Host headers accepted (DNS-rebinding protection). In compose the worker calls http://mcp:8000.
+ALLOWED_HOSTS = os.environ.get("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*").split(",")
 
 def secret(name: str) -> str:
     return (SECRETS_DIR / name).read_text().strip()
@@ -140,4 +143,6 @@ class BearerAuth:
 
 
 if __name__ == "__main__":
-    uvicorn.run(BearerAuth(mcp.streamable_http_app(), secret("mcp_token")), host=BIND, port=PORT)
+    security = TransportSecuritySettings(allowed_hosts=ALLOWED_HOSTS)
+    uvicorn.run(BearerAuth(mcp.streamable_http_app(transport_security=security), secret("mcp_token")),
+                host=BIND, port=PORT)

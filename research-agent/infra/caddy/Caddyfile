@@ -1,0 +1,22 @@
+{
+	admin off
+}
+
+localhost {
+	tls internal
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	request_body {
+		max_size 64KB
+	}
+
+	reverse_proxy api:8000
+}
