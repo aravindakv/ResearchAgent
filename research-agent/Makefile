@@ -51,4 +51,4 @@ worker:
 > $(PY) worker/main.py
 
 smoke-dev:
-> BASE=http://127.0.0.1:8100 ./scripts/smoke-test.sh "$(TOPIC)"
+> BASE=http://127.0.0.1:8100 bash ./scripts/smoke-test.sh "$(TOPIC)"
